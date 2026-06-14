@@ -66,6 +66,19 @@ def log(event: str, **fields: Any) -> None:
     print(json.dumps(record, sort_keys=True), flush=True)
 
 
+def strip_think_blocks(text: str) -> str:
+    if "<think>" not in text.lower():
+        return text.strip()
+    # Try extracting everything after the last </think>
+    match = re.search(r"</think>", text, flags=re.IGNORECASE)
+    if match:
+        after = text[match.end():].strip()
+        if len(after) >= 100:
+            return after
+    # Fallback: strip just the tags, keep inner content
+    return re.sub(r"</?think>", "", text, flags=re.IGNORECASE).strip()
+
+
 def strip_html(value: str) -> str:
     parser = TextExtractor()
     parser.feed(value or "")
@@ -336,7 +349,7 @@ def main() -> int:
             feed_url=article.feed_url,
         )
 
-        caption = generate_caption(article, minimax_api_key)
+        caption = strip_think_blocks(generate_caption(article, minimax_api_key))
         log("caption_generated", chars=len(caption))
 
         if args.dry_run:
