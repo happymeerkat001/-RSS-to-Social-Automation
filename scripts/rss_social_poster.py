@@ -32,7 +32,8 @@ FEEDS = [
 
 DEFAULT_DB_PATH = Path.home() / ".rss_social_poster" / "posted.db"
 CONTENTSTUDIO_API_BASE = "https://api.contentstudio.io/api/v1"
-CLAUDE_MODEL = "claude-sonnet-4-20250514"
+MINIMAX_API_BASE = "https://api.minimaxi.chat/v1"
+MINIMAX_MODEL = "MiniMax-M3"
 
 
 class TextExtractor(HTMLParser):
@@ -189,14 +190,14 @@ def first_unposted(conn: sqlite3.Connection, articles: list[Article]) -> Article
 
 def generate_caption(article: Article, api_key: str) -> str:
     try:
-        import anthropic
+        from openai import OpenAI
     except ModuleNotFoundError as exc:
         raise RuntimeError(
-            "Missing dependency: anthropic. Install dependencies with "
+            "Missing dependency: openai. Install dependencies with "
             "`python3 -m pip install -r requirements.txt`."
         ) from exc
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = OpenAI(api_key=api_key, base_url=MINIMAX_API_BASE)
     prompt = f"""
 Write a concise B2B agency-style social caption for LinkedIn, Facebook, and Instagram.
 
@@ -215,22 +216,16 @@ Article summary:
 {article.summary or "No summary provided."}
 """.strip()
 
-    response = client.messages.create(
-        model=CLAUDE_MODEL,
+    response = client.chat.completions.create(
+        model=MINIMAX_MODEL,
         max_tokens=350,
         temperature=0.6,
         messages=[{"role": "user", "content": prompt}],
     )
 
-    parts: list[str] = []
-    for block in response.content:
-        text = getattr(block, "text", None)
-        if text:
-            parts.append(text)
-
-    caption = "\n".join(parts).strip()
+    caption = (response.choices[0].message.content or "").strip()
     if not caption:
-        raise RuntimeError("Claude returned an empty caption")
+        raise RuntimeError("MiniMax returned an empty caption")
     return caption
 
 
@@ -317,7 +312,7 @@ def main() -> int:
     args = parse_args()
 
     try:
-        anthropic_api_key = require_env("ANTHROPIC_API_KEY")
+        minimax_api_key = require_env("MINIMAX_API_KEY")
         contentstudio_api_key = os.getenv("CONTENTSTUDIO_API_KEY")
         contentstudio_workspace_id = os.getenv("CONTENTSTUDIO_WORKSPACE_ID")
         contentstudio_account_ids = os.getenv("CONTENTSTUDIO_ACCOUNT_IDS")
@@ -350,7 +345,7 @@ def main() -> int:
             feed_url=article.feed_url,
         )
 
-        caption = generate_caption(article, anthropic_api_key)
+        caption = generate_caption(article, minimax_api_key)
         log("caption_generated", chars=len(caption))
 
         if args.dry_run:

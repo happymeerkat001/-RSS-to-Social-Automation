@@ -1,6 +1,6 @@
 # RSS-to-Social Automation
 
-Self-hosted Python script that reads AI/news RSS feeds, deduplicates articles in SQLite, generates a caption with Claude, and queues the newest unposted item in ContentStudio.
+Self-hosted Python script that reads AI/news RSS feeds, deduplicates articles in SQLite, generates a caption with MiniMax M3, and queues the newest unposted item in ContentStudio.
 
 ## Files
 
@@ -11,7 +11,7 @@ Self-hosted Python script that reads AI/news RSS feeds, deduplicates articles in
 ## Requirements
 
 - Python 3.10+
-- Anthropic API key
+- MiniMax API key
 - ContentStudio API key
 - ContentStudio workspace ID
 - ContentStudio social account IDs
@@ -41,7 +41,7 @@ cp .env.example .env
 Edit `scripts/.env` and fill in:
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-...
+MINIMAX_API_KEY=...
 CONTENTSTUDIO_API_KEY=cs_...
 CONTENTSTUDIO_WORKSPACE_ID=...
 CONTENTSTUDIO_ACCOUNT_IDS=id1,id2,id3
@@ -111,6 +111,6 @@ curl -H "X-API-Key: $CONTENTSTUDIO_API_KEY" https://api.contentstudio.io/api/v1/
 1. Fetches articles from TechCrunch AI, VentureBeat AI, and Social Media Today.
 2. Filters out URLs already stored in `~/.rss_social_poster/posted.db`.
 3. Picks the newest remaining article.
-4. Generates a caption with Claude.
+4. Generates a caption with MiniMax M3.
 5. Queues the post in ContentStudio.
 6. Stores the posted URL in SQLite after a successful queue operation.
