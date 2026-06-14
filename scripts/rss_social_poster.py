@@ -313,20 +313,11 @@ def main() -> int:
 
     try:
         minimax_api_key = require_env("MINIMAX_API_KEY")
-        contentstudio_api_key = os.getenv("CONTENTSTUDIO_API_KEY")
-        contentstudio_workspace_id = os.getenv("CONTENTSTUDIO_WORKSPACE_ID")
-        contentstudio_account_ids = os.getenv("CONTENTSTUDIO_ACCOUNT_IDS")
+        contentstudio_api_key = require_env("CONTENTSTUDIO_API_KEY")
+        contentstudio_workspace_id = require_env("CONTENTSTUDIO_WORKSPACE_ID")
+        contentstudio_account_ids = require_env("CONTENTSTUDIO_ACCOUNT_IDS")
 
-        if not args.dry_run:
-            contentstudio_api_key = require_env("CONTENTSTUDIO_API_KEY")
-            contentstudio_workspace_id = require_env("CONTENTSTUDIO_WORKSPACE_ID")
-            contentstudio_account_ids = require_env("CONTENTSTUDIO_ACCOUNT_IDS")
-
-        account_ids = (
-            parse_account_ids(contentstudio_account_ids)
-            if contentstudio_account_ids
-            else []
-        )
+        account_ids = parse_account_ids(contentstudio_account_ids)
 
         conn = connect_db(args.db_path)
         articles = parse_feeds(FEEDS)
@@ -358,8 +349,8 @@ def main() -> int:
         result = publish_to_contentstudio(
             caption=caption,
             article_url=article.url,
-            api_key=contentstudio_api_key or "",
-            workspace_id=contentstudio_workspace_id or "",
+            api_key=contentstudio_api_key,
+            workspace_id=contentstudio_workspace_id,
             account_ids=account_ids,
         )
         mark_posted(conn, article)
