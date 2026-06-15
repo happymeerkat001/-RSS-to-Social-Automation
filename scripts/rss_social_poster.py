@@ -55,6 +55,7 @@ class Article:
     summary: str
     published_at: datetime
     feed_url: str
+    image_url: str | None = None
 
 
 def log(event: str, **fields: Any) -> None:
@@ -77,6 +78,33 @@ def strip_think_blocks(text: str) -> str:
             return after
     # Fallback: strip just the tags, keep inner content
     return re.sub(r"</?think>", "", text, flags=re.IGNORECASE).strip()
+
+
+_REASONING_MARKERS = re.compile(
+    r"^(The user wants|Let me|Key requirements|Draft:|Actually,|That'?s good|"
+    r"I need to|Let me check|Let me refine|Here'?s my)",
+    re.IGNORECASE,
+)
+
+
+def strip_reasoning_preamble(text: str) -> str:
+    """Strip chain-of-thought reasoning that MiniMax sometimes emits without <think> tags."""
+    paragraphs = re.split(r"\n{2,}", text.strip())
+    if len(paragraphs) <= 2:
+        return text.strip()
+
+    # Walk backwards from the end to find the caption block (last contiguous
+    # paragraphs that don't contain reasoning markers).
+    first_clean = len(paragraphs)
+    for i in range(len(paragraphs) - 1, -1, -1):
+        if _REASONING_MARKERS.search(paragraphs[i]):
+            break
+        first_clean = i
+
+    cleaned = paragraphs[first_clean:]
+    if cleaned:
+        return "\n\n".join(cleaned).strip()
+    return text.strip()
 
 
 def strip_html(value: str) -> str:
@@ -120,6 +148,52 @@ def entry_url(entry: Any) -> str | None:
     return None
 
 
+def extract_image_url(entry: Any) -> str | None:
+    media_content = entry.get("media_content") or []
+    for media in media_content:
+        url = media.get("url")
+        medium = str(media.get("medium") or "").lower()
+        media_type = str(media.get("type") or "").lower()
+        if url and (medium == "image" or media_type.startswith("image/")):
+            return str(url).strip()
+
+    enclosures = entry.get("enclosures") or []
+    for enclosure in enclosures:
+        url = enclosure.get("url") or enclosure.get("href")
+        enclosure_type = str(enclosure.get("type") or "").lower()
+        if url and enclosure_type.startswith("image/"):
+            return str(url).strip()
+
+    media_thumbnail = entry.get("media_thumbnail") or []
+    for thumbnail in media_thumbnail:
+        url = thumbnail.get("url")
+        if url:
+            return str(url).strip()
+
+    html_candidates: list[str] = []
+    for key in ("summary", "description"):
+        value = entry.get(key)
+        if value:
+            html_candidates.append(str(value))
+
+    content = entry.get("content") or []
+    if content:
+        first_content = content[0]
+        if isinstance(first_content, dict):
+            value = first_content.get("value")
+        else:
+            value = getattr(first_content, "value", None)
+        if value:
+            html_candidates.append(str(value))
+
+    for html in html_candidates:
+        match = re.search(r"<img\b[^>]*\bsrc=[\"']([^\"']+)[\"']", html, flags=re.IGNORECASE)
+        if match:
+            return unescape(match.group(1)).strip()
+
+    return None
+
+
 def parse_feeds(feed_urls: list[str]) -> list[Article]:
     try:
         import feedparser
@@ -156,6 +230,7 @@ def parse_feeds(feed_urls: list[str]) -> list[Article]:
                     summary=summary,
                     published_at=entry_datetime(entry),
                     feed_url=feed_url,
+                    image_url=extract_image_url(entry),
                 )
             )
 
@@ -211,6 +286,10 @@ def generate_caption(article: Article, api_key: str) -> str:
         ) from exc
 
     client = OpenAI(api_key=api_key, base_url=MINIMAX_API_BASE)
+    system_msg = (
+        "You are a social media copywriter. Output ONLY the final caption text. "
+        "Do not include any reasoning, drafts, commentary, or thought process."
+    )
     prompt = f"""
 Write a concise B2B agency-style social caption for LinkedIn, Facebook, and Instagram.
 
@@ -220,7 +299,7 @@ Requirements:
 - No hype, no emojis
 - Include 2-3 relevant hashtags
 - Do not include the article URL
-- Return only the caption text
+- Return only the caption text — no preamble, no reasoning, no drafts
 
 Article title:
 {article.title}
@@ -233,12 +312,17 @@ Article summary:
         model=MINIMAX_MODEL,
         max_tokens=350,
         temperature=0.6,
-        messages=[{"role": "user", "content": prompt}],
+        messages=[
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": prompt},
+        ],
     )
 
     caption = (response.choices[0].message.content or "").strip()
     if not caption:
         raise RuntimeError("MiniMax returned an empty caption")
+    caption = strip_think_blocks(caption)
+    caption = strip_reasoning_preamble(caption)
     return caption
 
 
@@ -248,6 +332,7 @@ def publish_to_contentstudio(
     api_key: str,
     workspace_id: str,
     account_ids: list[str],
+    image_url: str | None = None,
 ) -> dict[str, Any]:
     try:
         import requests
@@ -258,8 +343,12 @@ def publish_to_contentstudio(
         ) from exc
 
     endpoint = f"{CONTENTSTUDIO_API_BASE}/workspaces/{workspace_id}/posts"
+    content: dict[str, Any] = {"text": f"{caption}\n\n{article_url}"}
+    if image_url:
+        content["media"] = {"images": [image_url]}
+
     payload = {
-        "content": {"text": f"{caption}\n\n{article_url}"},
+        "content": content,
         "accounts": account_ids,
         "scheduling": {"publish_type": "queued"},
     }
@@ -329,8 +418,14 @@ def main() -> int:
         contentstudio_api_key = require_env("CONTENTSTUDIO_API_KEY")
         contentstudio_workspace_id = require_env("CONTENTSTUDIO_WORKSPACE_ID")
         contentstudio_account_ids = require_env("CONTENTSTUDIO_ACCOUNT_IDS")
+        instagram_account_id = os.getenv("CONTENTSTUDIO_INSTAGRAM_ACCOUNT_ID")
 
         account_ids = parse_account_ids(contentstudio_account_ids)
+        if instagram_account_id and instagram_account_id not in account_ids:
+            log(
+                "instagram_account_not_configured",
+                instagram_account_id=instagram_account_id,
+            )
 
         conn = connect_db(args.db_path)
         articles = parse_feeds(FEEDS)
@@ -347,16 +442,38 @@ def main() -> int:
             url=article.url,
             published_at=article.published_at.isoformat(),
             feed_url=article.feed_url,
+            image_url=article.image_url,
         )
 
-        caption = strip_think_blocks(generate_caption(article, minimax_api_key))
+        caption = generate_caption(article, minimax_api_key)
         log("caption_generated", chars=len(caption))
+
+        publish_account_ids = list(account_ids)
+        if instagram_account_id and not article.image_url:
+            publish_account_ids = [
+                account_id
+                for account_id in publish_account_ids
+                if account_id != instagram_account_id
+            ]
+            if len(publish_account_ids) != len(account_ids):
+                log(
+                    "instagram_skipped_no_image",
+                    article_url=article.url,
+                    instagram_account_id=instagram_account_id,
+                )
+
+        if not publish_account_ids:
+            log("no_accounts_to_publish", article_url=article.url)
+            return 0
 
         if args.dry_run:
             print("\n--- DRY RUN ---")
             print(caption)
             print()
             print(article.url)
+            if article.image_url:
+                print(article.image_url)
+            print(f"Accounts: {', '.join(publish_account_ids)}")
             return 0
 
         result = publish_to_contentstudio(
@@ -364,7 +481,8 @@ def main() -> int:
             article_url=article.url,
             api_key=contentstudio_api_key,
             workspace_id=contentstudio_workspace_id,
-            account_ids=account_ids,
+            account_ids=publish_account_ids,
+            image_url=article.image_url,
         )
         mark_posted(conn, article)
         log("contentstudio_queued", url=article.url, response=result)
