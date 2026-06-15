@@ -34,6 +34,15 @@ DEFAULT_DB_PATH = Path.home() / ".rss_social_poster" / "posted.db"
 CONTENTSTUDIO_API_BASE = "https://api.contentstudio.io/api/v1"
 MINIMAX_API_BASE = "https://api.minimaxi.chat/v1"
 MINIMAX_MODEL = "MiniMax-M3"
+RAW_GITHUB_BASE_URL = (
+    "https://raw.githubusercontent.com/"
+    "happymeerkat001/-RSS-to-Social-Automation/main/"
+)
+FEED_IMAGE_MAP = {
+    FEEDS[0]: f"{RAW_GITHUB_BASE_URL}scripts/assets/techcrunch.jpg",
+    FEEDS[1]: f"{RAW_GITHUB_BASE_URL}scripts/assets/venturebeat.png",
+    FEEDS[2]: f"{RAW_GITHUB_BASE_URL}scripts/assets/socialmediatoday.jpeg",
+}
 
 
 class TextExtractor(HTMLParser):
@@ -55,7 +64,6 @@ class Article:
     summary: str
     published_at: datetime
     feed_url: str
-    image_url: str | None = None
 
 
 def log(event: str, **fields: Any) -> None:
@@ -148,50 +156,11 @@ def entry_url(entry: Any) -> str | None:
     return None
 
 
-def extract_image_url(entry: Any) -> str | None:
-    media_content = entry.get("media_content") or []
-    for media in media_content:
-        url = media.get("url")
-        medium = str(media.get("medium") or "").lower()
-        media_type = str(media.get("type") or "").lower()
-        if url and (medium == "image" or media_type.startswith("image/")):
-            return str(url).strip()
-
-    enclosures = entry.get("enclosures") or []
-    for enclosure in enclosures:
-        url = enclosure.get("url") or enclosure.get("href")
-        enclosure_type = str(enclosure.get("type") or "").lower()
-        if url and enclosure_type.startswith("image/"):
-            return str(url).strip()
-
-    media_thumbnail = entry.get("media_thumbnail") or []
-    for thumbnail in media_thumbnail:
-        url = thumbnail.get("url")
-        if url:
-            return str(url).strip()
-
-    html_candidates: list[str] = []
-    for key in ("summary", "description"):
-        value = entry.get(key)
-        if value:
-            html_candidates.append(str(value))
-
-    content = entry.get("content") or []
-    if content:
-        first_content = content[0]
-        if isinstance(first_content, dict):
-            value = first_content.get("value")
-        else:
-            value = getattr(first_content, "value", None)
-        if value:
-            html_candidates.append(str(value))
-
-    for html in html_candidates:
-        match = re.search(r"<img\b[^>]*\bsrc=[\"']([^\"']+)[\"']", html, flags=re.IGNORECASE)
-        if match:
-            return unescape(match.group(1)).strip()
-
-    return None
+def feed_image_url(feed_url: str) -> str:
+    image_url = FEED_IMAGE_MAP.get(feed_url)
+    if not image_url:
+        raise RuntimeError(f"No feed image configured for feed URL: {feed_url}")
+    return image_url
 
 
 def parse_feeds(feed_urls: list[str]) -> list[Article]:
@@ -230,7 +199,6 @@ def parse_feeds(feed_urls: list[str]) -> list[Article]:
                     summary=summary,
                     published_at=entry_datetime(entry),
                     feed_url=feed_url,
-                    image_url=extract_image_url(entry),
                 )
             )
 
@@ -332,7 +300,7 @@ def publish_to_contentstudio(
     api_key: str,
     workspace_id: str,
     account_ids: list[str],
-    image_url: str | None = None,
+    image_url: str,
 ) -> dict[str, Any]:
     try:
         import requests
@@ -344,8 +312,7 @@ def publish_to_contentstudio(
 
     endpoint = f"{CONTENTSTUDIO_API_BASE}/workspaces/{workspace_id}/posts"
     content: dict[str, Any] = {"text": f"{caption}\n\n{article_url}"}
-    if image_url:
-        content["media"] = {"images": [image_url]}
+    content["media"] = {"images": [image_url]}
 
     payload = {
         "content": content,
@@ -418,14 +385,8 @@ def main() -> int:
         contentstudio_api_key = require_env("CONTENTSTUDIO_API_KEY")
         contentstudio_workspace_id = require_env("CONTENTSTUDIO_WORKSPACE_ID")
         contentstudio_account_ids = require_env("CONTENTSTUDIO_ACCOUNT_IDS")
-        instagram_account_id = os.getenv("CONTENTSTUDIO_INSTAGRAM_ACCOUNT_ID")
 
         account_ids = parse_account_ids(contentstudio_account_ids)
-        if instagram_account_id and instagram_account_id not in account_ids:
-            log(
-                "instagram_account_not_configured",
-                instagram_account_id=instagram_account_id,
-            )
 
         conn = connect_db(args.db_path)
         articles = parse_feeds(FEEDS)
@@ -436,44 +397,26 @@ def main() -> int:
             log("no_unposted_articles")
             return 0
 
+        article_image_url = feed_image_url(article.feed_url)
         log(
             "article_selected",
             title=article.title,
             url=article.url,
             published_at=article.published_at.isoformat(),
             feed_url=article.feed_url,
-            image_url=article.image_url,
+            image_url=article_image_url,
         )
 
         caption = generate_caption(article, minimax_api_key)
         log("caption_generated", chars=len(caption))
-
-        publish_account_ids = list(account_ids)
-        if instagram_account_id and not article.image_url:
-            publish_account_ids = [
-                account_id
-                for account_id in publish_account_ids
-                if account_id != instagram_account_id
-            ]
-            if len(publish_account_ids) != len(account_ids):
-                log(
-                    "instagram_skipped_no_image",
-                    article_url=article.url,
-                    instagram_account_id=instagram_account_id,
-                )
-
-        if not publish_account_ids:
-            log("no_accounts_to_publish", article_url=article.url)
-            return 0
 
         if args.dry_run:
             print("\n--- DRY RUN ---")
             print(caption)
             print()
             print(article.url)
-            if article.image_url:
-                print(article.image_url)
-            print(f"Accounts: {', '.join(publish_account_ids)}")
+            print(article_image_url)
+            print(f"Accounts: {', '.join(account_ids)}")
             return 0
 
         result = publish_to_contentstudio(
@@ -481,8 +424,8 @@ def main() -> int:
             article_url=article.url,
             api_key=contentstudio_api_key,
             workspace_id=contentstudio_workspace_id,
-            account_ids=publish_account_ids,
-            image_url=article.image_url,
+            account_ids=account_ids,
+            image_url=article_image_url,
         )
         mark_posted(conn, article)
         log("contentstudio_queued", url=article.url, response=result)
