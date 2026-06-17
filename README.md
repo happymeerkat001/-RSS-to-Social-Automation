@@ -49,25 +49,27 @@ CONTENTSTUDIO_ACCOUNT_IDS=id1,id2,id3
 
 ## Commands
 
-Dry run:
+All commands run from the `scripts/` directory so `.env` is loaded automatically.
+
+Dry run (prints caption without posting):
 
 ```bash
 cd scripts
-./rss_social_poster.py --dry-run
+python3 rss_social_poster.py --dry-run
 ```
 
 Live run:
 
 ```bash
 cd scripts
-./rss_social_poster.py
+python3 rss_social_poster.py
 ```
 
 Custom database path:
 
 ```bash
 cd scripts
-./rss_social_poster.py --db-path /path/to/posted.db
+python3 rss_social_poster.py --db-path /path/to/posted.db
 ```
 
 Syntax check:
@@ -81,7 +83,7 @@ python3 -m py_compile scripts/rss_social_poster.py
 Run every Monday, Wednesday, and Friday at 9:00 AM:
 
 ```cron
-0 9 * * 1,3,5 cd "/path/to/-RSS-to-Social-Automation/scripts" && ./rss_social_poster.py >> ~/.rss_social_poster/run.log 2>&1
+0 9 * * 1,3,5 cd "/path/to/-RSS-to-Social-Automation/scripts" && python3 rss_social_poster.py >> ~/.rss_social_poster/run.log 2>&1
 ```
 
 ## ContentStudio API values
