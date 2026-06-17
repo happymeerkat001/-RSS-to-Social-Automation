@@ -101,15 +101,20 @@ def strip_reasoning_preamble(text: str) -> str:
     if len(paragraphs) <= 2:
         return text.strip()
 
-    # Walk backwards from the end to find the caption block (last contiguous
-    # paragraphs that don't contain reasoning markers).
-    first_clean = len(paragraphs)
-    for i in range(len(paragraphs) - 1, -1, -1):
+    # Skip any trailing reasoning paragraphs so the backwards walk
+    # finds the final clean block (the caption MiniMax settled on).
+    end = len(paragraphs)
+    while end > 0 and _REASONING_MARKERS.search(paragraphs[end - 1]):
+        end -= 1
+
+    # Walk backwards from `end` to collect the last contiguous clean block.
+    first_clean = end
+    for i in range(end - 1, -1, -1):
         if _REASONING_MARKERS.search(paragraphs[i]):
             break
         first_clean = i
 
-    cleaned = paragraphs[first_clean:]
+    cleaned = paragraphs[first_clean:end]
     if cleaned:
         return "\n\n".join(cleaned).strip()
     return text.strip()
