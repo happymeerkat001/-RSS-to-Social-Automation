@@ -51,31 +51,38 @@ CONTENTSTUDIO_ACCOUNT_IDS=id1,id2,id3
 
 All commands run from the `scripts/` directory so `.env` is loaded automatically.
 
+Important:
+- Run the Python script directly; do not run this workflow through `hermes`.
+- `OPENAI_BASE_URL` is ignored by this project. The script explicitly sends caption generation requests to MiniMax at `https://api.minimaxi.chat/v1`.
+- You must provide `MINIMAX_API_KEY` in `scripts/.env`.
+- Use the project virtualenv interpreter so required packages (`feedparser`, `python-dotenv`, `openai`, `requests`) are available.
+
 Dry run (prints caption without posting):
 
 ```bash
 cd scripts
-python3 rss_social_poster.py --dry-run
+./venv/bin/python rss_social_poster.py --dry-run
 ```
 
 Live run:
 
 ```bash
 cd scripts
-python3 rss_social_poster.py
+./venv/bin/python rss_social_poster.py
 ```
-
+  
 Custom database path:
 
 ```bash
 cd scripts
-python3 rss_social_poster.py --db-path /path/to/posted.db
+./venv/bin/python rss_social_poster.py --db-path /path/to/posted.db
 ```
 
 Syntax check:
 
 ```bash
-python3 -m py_compile scripts/rss_social_poster.py
+cd scripts
+./venv/bin/python -m py_compile rss_social_poster.py
 ```
 
 ## Cron
@@ -83,7 +90,7 @@ python3 -m py_compile scripts/rss_social_poster.py
 Run every Monday, Wednesday, and Friday at 9:00 AM:
 
 ```cron
-0 9 * * 1,3,5 cd "/path/to/-RSS-to-Social-Automation/scripts" && python3 rss_social_poster.py >> ~/.rss_social_poster/run.log 2>&1
+0 9 * * 1,3,5 cd "/path/to/-RSS-to-Social-Automation/scripts" && ./venv/bin/python rss_social_poster.py >> ~/.rss_social_poster/run.log 2>&1
 ```
 
 ## ContentStudio API values
